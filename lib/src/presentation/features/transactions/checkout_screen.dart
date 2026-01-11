@@ -4,8 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../data/repositories/product_repository.dart';
+import '../../../data/repositories/transaction_repository.dart';
 import '../../features/history/history_models.dart';
+import '../../features/history/transactions_provider.dart';
 import 'pos_state.dart';
+import '../settings/tax_settings_provider.dart';
+import '../settings/store_settings_provider.dart';
+import '../../widgets/top_toast.dart';
 
 class CheckoutScreen extends ConsumerStatefulWidget {
   const CheckoutScreen({super.key});
@@ -18,24 +24,32 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   String _selectedPaymentMethod = 'Tunai'; // Tunai, QRIS, Kartu
   final TextEditingController _paymentController = TextEditingController();
   double _paymentAmount = 0;
+  bool _useForeignPrice = false;
+  late final ProviderSubscription<List<CartItem>> _cartSubscription;
+  late final ProviderSubscription<TaxSettings> _taxSubscription;
 
   @override
   void initState() {
     super.initState();
     // Initialize payment amount with total
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final total = ref.read(cartTotalProvider);
-      // Add tax 10%
-      final totalWithTax = total * 1.1;
-      _paymentController.text = totalWithTax.toInt().toString();
-      setState(() {
-        _paymentAmount = totalWithTax;
-      });
+      _syncPaymentWithTotal();
     });
+
+    _cartSubscription = ref.listenManual<List<CartItem>>(
+      cartProvider,
+      (_, __) => _syncPaymentWithTotal(),
+    );
+    _taxSubscription = ref.listenManual<TaxSettings>(
+      taxSettingsProvider,
+      (_, __) => _syncPaymentWithTotal(),
+    );
   }
 
   @override
   void dispose() {
+    _cartSubscription.close();
+    _taxSubscription.close();
     _paymentController.dispose();
     super.dispose();
   }
@@ -47,40 +61,59 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
     });
   }
 
-  void _handlePay(double total, double tax, double subtotal) {
+  Future<void> _handlePay(double total, double tax) async {
     final cart = ref.read(cartProvider);
     if (cart.isEmpty) return;
 
-    final now = DateTime.now();
-    final items = cart
-        .map(
-          (item) => HistoryLineItem(
-            name: item.product.name,
-            quantity: item.quantity,
-            price: item.product.price,
-          ),
-        )
-        .toList();
-
     final method = _mapPaymentMethod(_selectedPaymentMethod);
     final received = method == PaymentMethod.cash ? _paymentAmount : total;
+    final priceType = _useForeignPrice ? 'foreign' : 'local';
+    final priceResolver = (CartItem item) =>
+        _useForeignPrice ? item.product.priceForeign : item.product.priceLocal;
+    final storeProfile = ref.read(storeProfileProvider);
 
-    final transaction = HistoryTransaction(
-      id: '#ORD-${DateFormat('ddHHmmss').format(now)}',
-      cashier: 'Kasir',
-      dateTime: now,
-      amount: total,
-      status: TransactionStatus.success,
-      paymentMethod: method,
-      storeName: 'Kopi Senja Utama',
-      storeAddress: 'Jl. Melati No. 12, Jakarta Selatan',
-      items: items,
-      tax: tax,
-      discount: 0,
-      received: received,
-    );
+    final transactionRepo = ref.read(transactionRepositoryProvider);
+    final productRepo = ref.read(productRepositoryProvider);
 
-    context.push('/history/detail', extra: transaction);
+    try {
+      final transaction =
+          await ref.read(transactionsProvider.notifier).createTransaction(
+        () => transactionRepo.createTransaction(
+          cart: cart,
+          total: total,
+          tax: tax,
+          paymentMethod: method,
+          received: received,
+          priceType: priceType,
+          priceResolver: priceResolver,
+          storeName: storeProfile.name,
+          storeAddress: storeProfile.address,
+        ),
+      );
+
+      for (final item in cart) {
+        await productRepo.decrementStock(item.product.id, item.quantity);
+      }
+      await ref.read(productsProvider.notifier).refresh();
+      ref.read(cartProvider.notifier).clear();
+
+      if (mounted) {
+        showTopToast(
+          context,
+          message: 'Transaksi berhasil dibuat.',
+          type: ToastType.success,
+        );
+        context.push('/history/detail', extra: transaction);
+      }
+    } catch (error) {
+      if (mounted) {
+        showTopToast(
+          context,
+          message: 'Gagal membuat transaksi: $error',
+          type: ToastType.error,
+        );
+      }
+    }
   }
 
   PaymentMethod _mapPaymentMethod(String method) {
@@ -98,8 +131,10 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
   @override
   Widget build(BuildContext context) {
     final cart = ref.watch(cartProvider);
-    final subtotal = ref.watch(cartTotalProvider);
-    final tax = subtotal * 0.1;
+    final taxSettings = ref.watch(taxSettingsProvider);
+    final subtotal = _calculateSubtotal(cart);
+    final taxRate = _effectiveTaxRate(taxSettings);
+    final tax = subtotal * taxRate;
     final total = subtotal + tax;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
@@ -173,7 +208,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
-                                  currency.format(item.product.price),
+                                  currency.format(_priceForItem(item)),
                                   style: const TextStyle(
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -239,6 +274,39 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
+                  const Text(
+                    'JENIS HARGA',
+                    style: TextStyle(
+                      color: Colors.grey,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: surfaceVariant.withOpacity(0.6),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    padding: const EdgeInsets.all(4),
+                    child: Row(
+                      children: [
+                        _PriceTypeButton(
+                          label: 'Lokal',
+                          isSelected: !_useForeignPrice,
+                          onTap: () => _setPriceType(false),
+                          colorScheme: colorScheme,
+                        ),
+                        _PriceTypeButton(
+                          label: 'Bule',
+                          isSelected: _useForeignPrice,
+                          onTap: () => _setPriceType(true),
+                          colorScheme: colorScheme,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
                   Container(
                     decoration: BoxDecoration(
                       color: surfaceVariant.withOpacity(0.6),
@@ -370,7 +438,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                         ),
                         const SizedBox(height: 8),
                         _SummaryRow(
-                          label: 'Pajak (10%)',
+                          label: _taxLabel(taxSettings),
                           value: currency.format(tax),
                         ),
                         const Padding(
@@ -381,7 +449,7 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
                           label: 'Total Tagihan',
                           value: currency.format(total),
                           isBold: true,
-                          valueColor: Colors.black,
+                          valueColor: colorScheme.onSurface,
                         ),
                         if (_selectedPaymentMethod == 'Tunai') ...[
                           const SizedBox(height: 8),
@@ -419,7 +487,8 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
               children: [
                 Expanded(
                   child: FilledButton(
-                    onPressed: () => _handlePay(total, tax, subtotal),
+                    onPressed:
+                        total <= 0 ? null : () => _handlePay(total, tax),
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFF00BFA5), // Blue
                       padding: const EdgeInsets.symmetric(vertical: 16),
@@ -440,6 +509,99 @@ class _CheckoutScreenState extends ConsumerState<CheckoutScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _setPriceType(bool useForeign) {
+    setState(() => _useForeignPrice = useForeign);
+    final cart = ref.read(cartProvider);
+    final subtotal = cart.fold<double>(0, (sum, item) {
+      final price =
+          useForeign ? item.product.priceForeign : item.product.priceLocal;
+      return sum + price * item.quantity;
+    });
+    _updatePaymentAmount(_totalWithTax(subtotal));
+  }
+
+  double _calculateSubtotal(List<CartItem> cart) {
+    return cart.fold<double>(0, (sum, item) {
+      return sum + _priceForItem(item) * item.quantity;
+    });
+  }
+
+  void _syncPaymentWithTotal() {
+    final cart = ref.read(cartProvider);
+    final subtotal = _calculateSubtotal(cart);
+    final totalWithTax = _totalWithTax(subtotal);
+    if (!mounted) return;
+    _updatePaymentAmount(totalWithTax);
+  }
+
+  double _effectiveTaxRate(TaxSettings settings) {
+    return settings.enabled ? settings.rate / 100 : 0;
+  }
+
+  double _totalWithTax(double subtotal) {
+    final taxSettings = ref.read(taxSettingsProvider);
+    return subtotal * (1 + _effectiveTaxRate(taxSettings));
+  }
+
+  String _taxLabel(TaxSettings settings) {
+    final rateText = _formatTaxRate(settings.rate);
+    return settings.enabled ? 'Pajak ($rateText%)' : 'Pajak (Nonaktif)';
+  }
+
+  String _formatTaxRate(double rate) {
+    if (rate % 1 == 0) return rate.toInt().toString();
+    return rate
+        .toStringAsFixed(2)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  double _priceForItem(CartItem item) {
+    return _useForeignPrice
+        ? item.product.priceForeign
+        : item.product.priceLocal;
+  }
+}
+
+class _PriceTypeButton extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final ColorScheme colorScheme;
+
+  const _PriceTypeButton({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+    required this.colorScheme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected ? colorScheme.primary.withOpacity(0.12) : null,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: isSelected
+                  ? colorScheme.primary
+                  : colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -510,6 +672,7 @@ class _SummaryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -518,6 +681,7 @@ class _SummaryRow extends StatelessWidget {
           style: TextStyle(
             fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
             fontSize: isBold ? 16 : 14,
+            color: isBold ? colorScheme.onSurface : colorScheme.onSurfaceVariant,
           ),
         ),
         Text(
@@ -525,7 +689,7 @@ class _SummaryRow extends StatelessWidget {
           style: TextStyle(
             fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
             fontSize: isBold ? 16 : 14,
-            color: valueColor,
+            color: valueColor ?? colorScheme.onSurface,
           ),
         ),
       ],

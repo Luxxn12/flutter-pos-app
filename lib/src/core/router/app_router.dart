@@ -6,12 +6,14 @@ import '../../presentation/app_scaffold.dart';
 import '../../presentation/features/auth/auth_provider.dart';
 import '../../presentation/features/auth/login_screen.dart';
 import '../../presentation/features/dashboard/dashboard_screen.dart';
+import '../../presentation/features/categories/categories_screen.dart';
 import '../../presentation/features/history/history_screen.dart';
 import '../../presentation/features/history/history_detail_screen.dart';
 import '../../presentation/features/history/history_models.dart';
 import '../../presentation/features/products/product_edit_screen.dart';
 import '../../presentation/features/products/products_screen.dart';
 import '../../presentation/features/settings/settings_screen.dart';
+import '../../presentation/features/users/users_screen.dart';
 import '../../presentation/features/splash/splash_screen.dart';
 import '../../presentation/features/transactions/checkout_screen.dart';
 import '../../presentation/features/transactions/pos_screen.dart';
@@ -20,6 +22,8 @@ import '../../presentation/features/transactions/pos_screen.dart';
 
 final goRouterProvider = Provider<GoRouter>((ref) {
   final isLoggedIn = ref.watch(authProvider);
+  final userRole = ref.watch(userRoleProvider);
+  final isAdmin = userRole == UserRole.admin;
 
   return GoRouter(
     initialLocation: '/splash',
@@ -33,6 +37,18 @@ final goRouterProvider = Provider<GoRouter>((ref) {
       }
       if (isLoggedIn && state.uri.path == '/login') {
         return '/dashboard';
+      }
+      if (isLoggedIn && !isAdmin) {
+        const adminOnlyPaths = [
+          '/products/add',
+          '/products/edit',
+          '/categories',
+          '/users',
+        ];
+        final isAdminOnly = adminOnlyPaths.any(
+          (path) => state.uri.path.startsWith(path),
+        );
+        if (isAdminOnly) return '/dashboard';
       }
       return null;
     },
@@ -95,6 +111,14 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/settings',
             builder: (context, state) => const SettingsScreen(),
+          ),
+          GoRoute(
+            path: '/categories',
+            builder: (context, state) => const CategoriesScreen(),
+          ),
+          GoRoute(
+            path: '/users',
+            builder: (context, state) => const UsersScreen(),
           ),
         ],
       ),

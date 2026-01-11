@@ -92,7 +92,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen> with SingleTickerPr
                       ),
                       const SizedBox(height: 24),
                       Text(
-                        'Flutter POS',
+                        'POS App',
                         style: Theme.of(context).textTheme.headlineLarge?.copyWith(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,

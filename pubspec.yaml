@@ -50,6 +50,7 @@ dependencies:
   printing: ^5.14.2
   fl_chart: ^1.1.1
   shared_preferences: ^2.5.4
+  supabase_flutter: ^2.10.0
 
 dev_dependencies:
   flutter_test:

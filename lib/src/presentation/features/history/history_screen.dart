@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:go_router/go_router.dart';
 
 import 'history_models.dart';
+import 'transactions_provider.dart';
 
 class HistoryScreen extends ConsumerStatefulWidget {
   const HistoryScreen({super.key});
@@ -22,183 +23,74 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
   int _selectedPaymentIndex = 0;
   DateTime _selectedDate = DateTime.now();
 
-  List<HistoryTransaction> get _transactions {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    final yesterday = today.subtract(const Duration(days: 1));
-
-    return [
-      HistoryTransaction(
-        id: '#ORD-2410-008',
-        cashier: 'Budi Santoso',
-        dateTime: today.add(const Duration(hours: 14, minutes: 32)),
-        amount: 125000,
-        status: TransactionStatus.success,
-        paymentMethod: PaymentMethod.cash,
-        storeName: 'Kopi Senja Utama',
-        storeAddress: 'Jl. Melati No. 12, Jakarta Selatan',
-        items: const [
-          HistoryLineItem(
-            name: 'Kopi Susu Gula Aren',
-            quantity: 2,
-            price: 25000,
-          ),
-          HistoryLineItem(name: 'Croissant Butter', quantity: 2, price: 25000),
-          HistoryLineItem(
-            name: 'Original Cheese Cake',
-            quantity: 1,
-            price: 25000,
-          ),
-        ],
-        tax: 0,
-        discount: 0,
-        received: 130000,
-      ),
-      HistoryTransaction(
-        id: '#ORD-2410-007',
-        cashier: 'Kasir Siti',
-        dateTime: today.add(const Duration(hours: 13, minutes: 15)),
-        amount: 45000,
-        status: TransactionStatus.success,
-        paymentMethod: PaymentMethod.cash,
-        storeName: 'Kopi Senja Utama',
-        storeAddress: 'Jl. Melati No. 12, Jakarta Selatan',
-        items: const [
-          HistoryLineItem(name: 'Iced Americano', quantity: 1, price: 20000),
-          HistoryLineItem(name: 'Cinnamon Roll', quantity: 1, price: 25000),
-        ],
-        tax: 0,
-        discount: 0,
-        received: 50000,
-      ),
-      HistoryTransaction(
-        id: '#ORD-2410-006',
-        cashier: 'Kasir Budi',
-        dateTime: today.add(const Duration(hours: 11, minutes: 20)),
-        amount: 210000,
-        status: TransactionStatus.success,
-        paymentMethod: PaymentMethod.qris,
-        storeName: 'Kopi Senja Utama',
-        storeAddress: 'Jl. Melati No. 12, Jakarta Selatan',
-        items: const [
-          HistoryLineItem(name: 'Paket Sarapan', quantity: 3, price: 70000),
-        ],
-        tax: 0,
-        discount: 0,
-        received: 210000,
-      ),
-      HistoryTransaction(
-        id: '#ORD-2310-095',
-        cashier: 'Admin',
-        dateTime: yesterday.add(const Duration(hours: 19, minutes: 45)),
-        amount: 88000,
-        status: TransactionStatus.failed,
-        paymentMethod: PaymentMethod.debit,
-        storeName: 'Kopi Senja Utama',
-        storeAddress: 'Jl. Melati No. 12, Jakarta Selatan',
-        items: const [
-          HistoryLineItem(name: 'Affogato', quantity: 2, price: 22000),
-          HistoryLineItem(name: 'Kue Lapis', quantity: 2, price: 22000),
-        ],
-        tax: 0,
-        discount: 0,
-        received: 88000,
-      ),
-      HistoryTransaction(
-        id: '#ORD-2310-094',
-        cashier: 'Kasir Siti',
-        dateTime: yesterday.add(const Duration(hours: 18, minutes: 10)),
-        amount: 150000,
-        status: TransactionStatus.success,
-        paymentMethod: PaymentMethod.qris,
-        storeName: 'Kopi Senja Utama',
-        storeAddress: 'Jl. Melati No. 12, Jakarta Selatan',
-        items: const [
-          HistoryLineItem(name: 'Latte', quantity: 2, price: 30000),
-          HistoryLineItem(name: 'Tiramisu', quantity: 2, price: 45000),
-        ],
-        tax: 0,
-        discount: 0,
-        received: 150000,
-      ),
-      HistoryTransaction(
-        id: '#ORD-2310-093',
-        cashier: 'Kasir Budi',
-        dateTime: yesterday.add(const Duration(hours: 17, minutes: 30)),
-        amount: 32500,
-        status: TransactionStatus.success,
-        paymentMethod: PaymentMethod.cash,
-        storeName: 'Kopi Senja Utama',
-        storeAddress: 'Jl. Melati No. 12, Jakarta Selatan',
-        items: const [
-          HistoryLineItem(name: 'Roti Bakar Coklat', quantity: 1, price: 15000),
-          HistoryLineItem(name: 'Teh Tarik', quantity: 1, price: 17500),
-        ],
-        tax: 0,
-        discount: 0,
-        received: 50000,
-      ),
-    ];
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
-    final filtered = _selectedPaymentIndex == 0
-        ? _transactions
-        : _transactions
-              .where((t) => t.paymentMethod.index == _selectedPaymentIndex - 1)
-              .toList();
-
-    final dateFiltered = filtered.where((t) {
-      final d = DateTime(t.dateTime.year, t.dateTime.month, t.dateTime.day);
-      final sel = DateTime(
-        _selectedDate.year,
-        _selectedDate.month,
-        _selectedDate.day,
-      );
-      return d == sel;
-    }).toList();
-
-    final grouped = _groupByDate(dateFiltered);
+    final transactionsAsync = ref.watch(transactionsProvider);
+    final totalText = transactionsAsync.when(
+      data: (transactions) {
+        final filtered = _filterByPayment(transactions);
+        final dateFiltered = _filterByDate(filtered);
+        final total = _calculateTotalRevenue(dateFiltered);
+        return _currency.format(total);
+      },
+      loading: () => 'Memuat...',
+      error: (_, __) => _currency.format(0),
+    );
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
       body: SafeArea(
         child: Column(
           children: [
-            _buildHeader(colorScheme),
+            _buildHeader(colorScheme, totalText),
             _buildFilterChips(colorScheme),
             Expanded(
-              child: ListView.builder(
-                padding: EdgeInsets.zero,
-                itemCount: grouped.length,
-                itemBuilder: (context, index) {
-                  final entry = grouped.entries.elementAt(index);
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 20,
-                          vertical: 12,
-                        ),
-                        color: colorScheme.surfaceVariant.withOpacity(0.6),
-                        child: Text(
-                          entry.key,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            color: colorScheme.onSurface,
+              child: transactionsAsync.when(
+                data: (transactions) {
+                  final filtered = _filterByPayment(transactions);
+                  final dateFiltered = _filterByDate(filtered);
+                  final grouped = _groupByDate(dateFiltered);
+                  if (grouped.isEmpty) {
+                    return const Center(child: Text('Belum ada transaksi.'));
+                  }
+
+                  return ListView.builder(
+                    padding: EdgeInsets.zero,
+                    itemCount: grouped.length,
+                    itemBuilder: (context, index) {
+                      final entry = grouped.entries.elementAt(index);
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 20,
+                              vertical: 12,
+                            ),
+                            color: colorScheme.surfaceVariant.withOpacity(0.6),
+                            child: Text(
+                              entry.key,
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: colorScheme.onSurface,
+                              ),
+                            ),
                           ),
-                        ),
-                      ),
-                      ...entry.value.map(_buildTransactionTile).toList(),
-                    ],
+                          ...entry.value.map(_buildTransactionTile).toList(),
+                        ],
+                      );
+                    },
                   );
                 },
+                loading: () =>
+                    const Center(child: CircularProgressIndicator()),
+                error: (error, _) => Center(
+                  child: Text('Gagal memuat transaksi: $error'),
+                ),
               ),
             ),
           ],
@@ -207,7 +99,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     );
   }
 
-  Widget _buildHeader(ColorScheme colorScheme) {
+  Widget _buildHeader(ColorScheme colorScheme, String totalText) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
@@ -233,24 +125,24 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                   ),
                 ),
               ),
-              Container(
-                height: 48,
-                width: 48,
-                decoration: BoxDecoration(
-                  color: colorScheme.surfaceVariant.withOpacity(0.6),
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
-                      blurRadius: 10,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-              ),
+              // Container(
+              //   height: 48,
+              //   width: 48,
+              //   decoration: BoxDecoration(
+              //     color: colorScheme.surfaceVariant.withOpacity(0.6),
+              //     borderRadius: BorderRadius.circular(24),
+              //     boxShadow: [
+              //       BoxShadow(
+              //         color: Colors.black.withOpacity(0.04),
+              //         blurRadius: 10,
+              //         offset: const Offset(0, 6),
+              //       ),
+              //     ],
+              //   ),
+              // ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 20),
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -300,7 +192,7 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
                     ),
                   ),
                   Text(
-                    _currency.format(3450000),
+                    totalText,
                     style: TextStyle(
                       color: colorScheme.primary,
                       fontSize: 20,
@@ -325,48 +217,54 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
         color: colorScheme.surface,
         border: Border(bottom: BorderSide(color: colorScheme.outlineVariant)),
       ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: List.generate(filters.length, (index) {
-            final selected = _selectedPaymentIndex == index;
-            return Padding(
+      child: Row(
+        children: List.generate(filters.length, (index) {
+          final selected = _selectedPaymentIndex == index;
+          return Expanded(
+            child: Padding(
               padding: EdgeInsets.only(
-                right: index == filters.length - 1 ? 0 : 12,
+                right: index == filters.length - 1 ? 0 : 8,
               ),
-              child: ChoiceChip(
-                label: Text(
-                  filters[index],
-                  style: TextStyle(
-                    color: selected
-                        ? colorScheme.onPrimaryContainer
-                        : colorScheme.onSurface,
-                    fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
-                  ),
-                ),
-                selected: selected,
-                onSelected: (_) => setState(() {
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => setState(() {
                   _selectedPaymentIndex = index;
                 }),
-                backgroundColor: colorScheme.surface,
-                selectedColor: colorScheme.primaryContainer,
-                side: BorderSide(
-                  color: selected
-                      ? Colors.transparent
-                      : colorScheme.outlineVariant,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOut,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? colorScheme.primaryContainer
+                        : colorScheme.surface,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: selected
+                          ? Colors.transparent
+                          : colorScheme.outlineVariant,
+                    ),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    filters[index],
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: selected
+                          ? colorScheme.onPrimaryContainer
+                          : colorScheme.onSurface,
+                      fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                      fontSize: 12,
+                    ),
+                  ),
                 ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                showCheckmark: false,
               ),
-            );
-          }),
-        ),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -490,6 +388,43 @@ class _HistoryScreenState extends ConsumerState<HistoryScreen> {
     }
 
     return grouped;
+  }
+
+  List<HistoryTransaction> _filterByPayment(
+    List<HistoryTransaction> transactions,
+  ) {
+    if (_selectedPaymentIndex == 0) {
+      return transactions;
+    }
+    return transactions
+        .where(
+          (t) => t.paymentMethod.index == _selectedPaymentIndex - 1,
+        )
+        .toList();
+  }
+
+  List<HistoryTransaction> _filterByDate(
+    List<HistoryTransaction> transactions,
+  ) {
+    final sel = DateTime(
+      _selectedDate.year,
+      _selectedDate.month,
+      _selectedDate.day,
+    );
+    return transactions.where((t) {
+      final d = DateTime(
+        t.dateTime.year,
+        t.dateTime.month,
+        t.dateTime.day,
+      );
+      return d == sel;
+    }).toList();
+  }
+
+  double _calculateTotalRevenue(List<HistoryTransaction> transactions) {
+    return transactions
+        .where((t) => t.status == TransactionStatus.success)
+        .fold(0.0, (sum, t) => sum + t.amount);
   }
 
   String _dateLabel() {

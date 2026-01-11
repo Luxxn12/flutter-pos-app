@@ -1,8 +1,12 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../../core/theme/app_theme.dart';
 import '../auth/auth_provider.dart';
+import 'tax_settings_provider.dart';
+import 'store_settings_provider.dart';
+import '../../widgets/top_toast.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -21,7 +25,18 @@ class SettingsScreen extends ConsumerWidget {
     final dangerBg = colorScheme.errorContainer;
     final dangerText = colorScheme.onErrorContainer;
     final themeMode = ref.watch(themeModeProvider);
+    final taxSettings = ref.watch(taxSettingsProvider);
+    final storeProfile = ref.watch(storeProfileProvider);
+    final isAdmin = ref.watch(isAdminProvider);
+    final displayName = ref.watch(userDisplayNameProvider);
+    final role = ref.watch(userRoleProvider);
     final isDarkMode = themeMode == ThemeMode.dark;
+    final taxSubtitle = taxSettings.enabled
+        ? 'Aktif (${_formatTaxRate(taxSettings.rate)}%)'
+        : 'Nonaktif (${_formatTaxRate(taxSettings.rate)}%)';
+    final storeSubtitle =
+        '${storeProfile.name}\n${storeProfile.address}';
+    final roleLabel = role == UserRole.admin ? 'Administrator' : 'Kasir';
 
     return Scaffold(
       backgroundColor: pageBackground,
@@ -46,6 +61,8 @@ class SettingsScreen extends ConsumerWidget {
                 badgeBg: badgeBg,
                 borderColor: cardBorder,
                 cardColor: cardColor,
+                displayName: displayName,
+                roleLabel: roleLabel,
               ),
               const SizedBox(height: 24),
               Text(
@@ -75,6 +92,34 @@ class SettingsScreen extends ConsumerWidget {
                             .setTheme(value ? ThemeMode.dark : ThemeMode.light);
                       },
                     ),
+                  ),
+                  _TileDivider(color: cardBorder),
+                  _SettingsTile(
+                    icon: Icons.storefront_outlined,
+                    title: 'Profil Toko',
+                    subtitle: storeSubtitle,
+                    primaryText: primaryText,
+                    mutedText: mutedText,
+                    trailing: const Icon(Icons.edit, size: 18),
+                    onTap: () =>
+                        _showStoreProfileDialog(context, ref, storeProfile),
+                  ),
+                  _TileDivider(color: cardBorder),
+                  _SettingsTile(
+                    icon: Icons.percent_rounded,
+                    title: 'Pajak Transaksi',
+                    subtitle: taxSubtitle,
+                    primaryText: primaryText,
+                    mutedText: mutedText,
+                    trailing: Switch.adaptive(
+                      value: taxSettings.enabled,
+                      activeColor: AppTheme.seedColor,
+                      onChanged: (value) => ref
+                          .read(taxSettingsProvider.notifier)
+                          .setEnabled(value),
+                    ),
+                    onTap: () =>
+                        _showTaxRateDialog(context, ref, taxSettings.rate),
                   ),
                   _TileDivider(color: cardBorder),
                   _SettingsTile(
@@ -115,19 +160,31 @@ class SettingsScreen extends ConsumerWidget {
                     mutedText: mutedText,
                     onTap: () {},
                   ),
-                  _TileDivider(color: cardBorder),
-                  _SettingsTile(
-                    icon: Icons.group_outlined,
-                    title: 'Kelola Pengguna',
-                    primaryText: primaryText,
-                    mutedText: mutedText,
-                    onTap: () {},
-                  ),
+                  if (isAdmin) _TileDivider(color: cardBorder),
+                  if (isAdmin)
+                    _SettingsTile(
+                      icon: Icons.group_outlined,
+                      title: 'Kelola Pengguna',
+                      primaryText: primaryText,
+                      mutedText: mutedText,
+                      onTap: () => context.push('/users'),
+                    ),
+                  if (isAdmin) _TileDivider(color: cardBorder),
+                  if (isAdmin)
+                    _SettingsTile(
+                      icon: Icons.category_outlined,
+                      title: 'Kategori Produk',
+                      primaryText: primaryText,
+                      mutedText: mutedText,
+                      onTap: () => context.push('/categories'),
+                    ),
                 ],
               ),
               const SizedBox(height: 24),
               GestureDetector(
-                onTap: () => ref.read(authProvider.notifier).logout(),
+                onTap: () async {
+                  await ref.read(authControllerProvider).signOut();
+                },
                 child: Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 16),
@@ -164,6 +221,131 @@ class SettingsScreen extends ConsumerWidget {
       ),
     );
   }
+
+  String _formatTaxRate(double rate) {
+    if (rate % 1 == 0) {
+      return rate.toInt().toString();
+    }
+    return rate.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+  }
+
+  Future<void> _showTaxRateDialog(
+    BuildContext context,
+    WidgetRef ref,
+    double currentRate,
+  ) async {
+    final controller =
+        TextEditingController(text: _formatTaxRate(currentRate));
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Atur Pajak'),
+          content: TextField(
+            controller: controller,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              hintText: 'Contoh: 10',
+              suffixText: '%',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Simpan'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result != true) return;
+    final parsed = double.tryParse(
+      controller.text.trim().replaceAll(',', '.'),
+    );
+    if (parsed == null) {
+      showTopToast(
+        context,
+        message: 'Nilai pajak tidak valid.',
+        type: ToastType.error,
+      );
+      return;
+    }
+    await ref.read(taxSettingsProvider.notifier).setRate(parsed);
+  }
+
+  Future<void> _showStoreProfileDialog(
+    BuildContext context,
+    WidgetRef ref,
+    StoreProfile profile,
+  ) async {
+    final nameController = TextEditingController(text: profile.name);
+    final addressController = TextEditingController(text: profile.address);
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Profil Toko'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                decoration: const InputDecoration(
+                  labelText: 'Nama Toko',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: addressController,
+                decoration: const InputDecoration(
+                  labelText: 'Alamat Toko',
+                ),
+                maxLines: 2,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Simpan'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result != true) return;
+    final name = nameController.text.trim();
+    final address = addressController.text.trim();
+    if (name.isEmpty || address.isEmpty) {
+      showTopToast(
+        context,
+        message: 'Nama dan alamat toko wajib diisi.',
+        type: ToastType.error,
+      );
+      return;
+    }
+    await ref
+        .read(storeProfileProvider.notifier)
+        .setProfile(name: name, address: address);
+    if (context.mounted) {
+      showTopToast(
+        context,
+        message: 'Profil toko berhasil diperbarui.',
+        type: ToastType.success,
+      );
+    }
+  }
 }
 
 class _ProfileCard extends StatelessWidget {
@@ -172,6 +354,8 @@ class _ProfileCard extends StatelessWidget {
   final Color badgeBg;
   final Color borderColor;
   final Color cardColor;
+  final String displayName;
+  final String roleLabel;
 
   const _ProfileCard({
     required this.primaryText,
@@ -179,6 +363,8 @@ class _ProfileCard extends StatelessWidget {
     required this.badgeBg,
     required this.borderColor,
     required this.cardColor,
+    required this.displayName,
+    required this.roleLabel,
   });
 
   @override
@@ -211,7 +397,7 @@ class _ProfileCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Budi Santoso',
+                  displayName,
                   style: TextStyle(
                     color: primaryText,
                     fontSize: 18,
@@ -227,7 +413,7 @@ class _ProfileCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    'Administrator',
+                    roleLabel,
                     style: TextStyle(
                       color: primaryText,
                       fontWeight: FontWeight.w600,

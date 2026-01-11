@@ -6,6 +6,9 @@ import 'package:intl/intl.dart';
 import '../../../domain/entities/product.dart';
 import 'pos_state.dart';
 
+import '../categories/categories_provider.dart';
+import '../settings/tax_settings_provider.dart';
+
 class PosScreen extends ConsumerWidget {
   const PosScreen({super.key});
 
@@ -21,12 +24,47 @@ class PosScreen extends ConsumerWidget {
   }
 }
 
+List<Product> _filterProductsByCategory(
+  List<Product> products,
+  int selectedIndex,
+  List<String> categories,
+) {
+  if (selectedIndex <= 0 || selectedIndex >= categories.length) {
+    return products;
+  }
+  final selectedCategory = categories[selectedIndex];
+  return products.where((product) => product.category == selectedCategory).toList();
+}
+
+List<Product> _filterProductsByQuery(List<Product> products, String query) {
+  final trimmed = query.trim().toLowerCase();
+  if (trimmed.isEmpty) return products;
+  return products.where((product) {
+    final name = product.name.toLowerCase();
+    final sku = product.id.toLowerCase();
+    return name.contains(trimmed) || sku.contains(trimmed);
+  }).toList();
+}
+
 class _MobilePosLayout extends ConsumerWidget {
   const _MobilePosLayout();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final products = ref.watch(productsProvider);
+    final productsAsync = ref.watch(productsProvider);
+    final categoriesAsync = ref.watch(categoriesProvider);
+    final selectedCategoryIndex = ref.watch(selectedCategoryIndexProvider);
+    final searchQuery = ref.watch(productSearchQueryProvider);
+    final categories = categoriesAsync.when(
+      data: (items) => ['Semua', ...items.map((c) => c.name)],
+      loading: () => const ['Semua'],
+      error: (_, __) => const ['Semua'],
+    );
+    if (selectedCategoryIndex >= categories.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(selectedCategoryIndexProvider.notifier).setIndex(0);
+      });
+    }
     final cart = ref.watch(cartProvider);
     final cartTotal = ref.watch(cartTotalProvider);
     final currency = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
@@ -39,16 +77,44 @@ class _MobilePosLayout extends ConsumerWidget {
           children: [
             Column(
               children: [
-                _buildHeader(context),
-                _buildCategories(context),
+                _buildHeader(context, ref),
+                _buildCategories(context, ref, categories),
+                const SizedBox(height: 12),
                 Expanded(
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 100), // Bottom padding for floating bar
-                    itemCount: products.length,
-                    separatorBuilder: (context, index) => const SizedBox(height: 16),
-                    itemBuilder: (context, index) {
-                      return _ProductListCard(product: products[index]);
+                  child: productsAsync.when(
+                    data: (products) {
+                      final filteredProducts = _filterProductsByCategory(
+                        products,
+                        selectedCategoryIndex,
+                        categories,
+                      );
+                      final searchedProducts =
+                          _filterProductsByQuery(filteredProducts, searchQuery);
+                      if (searchedProducts.isEmpty) {
+                        return const Center(child: Text('Produk belum tersedia.'));
+                      }
+                      return ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(
+                          20,
+                          0,
+                          20,
+                          100,
+                        ),
+                        itemCount: searchedProducts.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(height: 16),
+                        itemBuilder: (context, index) {
+                          return _ProductListCard(
+                            product: searchedProducts[index],
+                          );
+                        },
+                      );
                     },
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (error, _) => Center(
+                      child: Text('Gagal memuat produk: $error'),
+                    ),
                   ),
                 ),
               ],
@@ -70,7 +136,7 @@ class _MobilePosLayout extends ConsumerWidget {
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -97,6 +163,9 @@ class _MobilePosLayout extends ConsumerWidget {
                         contentPadding: EdgeInsets.only(bottom: 4) // Align text
                       ),
                       cursorColor: colorScheme.primary,
+                      onChanged: (value) => ref
+                          .read(productSearchQueryProvider.notifier)
+                          .setQuery(value),
                     ),
                   ),
                 ],
@@ -122,9 +191,13 @@ class _MobilePosLayout extends ConsumerWidget {
     );
   }
 
-  Widget _buildCategories(BuildContext context) {
+  Widget _buildCategories(
+    BuildContext context,
+    WidgetRef ref,
+    List<String> categories,
+  ) {
     final colorScheme = Theme.of(context).colorScheme;
-    final categories = ['Semua', 'Makanan', 'Minuman', 'Snack', 'Topping'];
+    final selectedIndex = ref.watch(selectedCategoryIndexProvider);
     return SizedBox(
       height: 50,
       child: ListView.separated(
@@ -133,9 +206,8 @@ class _MobilePosLayout extends ConsumerWidget {
         itemCount: categories.length,
         separatorBuilder: (context, index) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
-          final isSelected = index == 0;
-          return Chip(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          final isSelected = index == selectedIndex;
+          return ChoiceChip(
             label: Text(
               categories[index],
               style: TextStyle(
@@ -145,17 +217,20 @@ class _MobilePosLayout extends ConsumerWidget {
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
               ),
             ),
-            backgroundColor: isSelected
-                ? colorScheme.primaryContainer
-                : colorScheme.surface,
+            selected: isSelected,
+            onSelected: (_) =>
+                ref.read(selectedCategoryIndexProvider.notifier).setIndex(index),
+            backgroundColor: colorScheme.surface,
+            selectedColor: colorScheme.primaryContainer,
+            side: BorderSide(
+              color:
+                  isSelected ? Colors.transparent : colorScheme.outlineVariant,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: BorderSide(
-                color:
-                    isSelected ? Colors.transparent : colorScheme.outlineVariant,
-              ),
             ),
-            side: BorderSide.none, // Remove default border
+            showCheckmark: false,
           );
         },
       ),
@@ -207,10 +282,10 @@ class _ProductListCard extends ConsumerWidget {
             decoration: BoxDecoration(
               color: colorScheme.surfaceVariant.withOpacity(0.6),
               borderRadius: BorderRadius.circular(12),
-              image: const DecorationImage(
-                image: NetworkImage('https://i.pravatar.cc/150'), // Placeholder from image
-                fit: BoxFit.cover,
-              ),
+              // image: const DecorationImage(
+              //   image: NetworkImage('https://i.pravatar.cc/150'), // Placeholder from image
+              //   fit: BoxFit.cover,
+              // ),
             ),
             // Fallback if image fails
             child: Icon(Icons.fastfood, color: colorScheme.onSurfaceVariant),
@@ -239,7 +314,7 @@ class _ProductListCard extends ConsumerWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  currency.format(product.price),
+                  currency.format(product.priceLocal),
                   style: TextStyle(
                     color: colorScheme.primary,
                     fontWeight: FontWeight.bold,
@@ -349,6 +424,10 @@ class _CartBottomSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final cart = ref.watch(cartProvider);
     final total = ref.watch(cartTotalProvider);
+    final taxSettings = ref.watch(taxSettingsProvider);
+    final taxRate = taxSettings.enabled ? taxSettings.rate / 100 : 0;
+    final taxAmount = total * taxRate;
+    final totalWithTax = total + taxAmount;
     final currency = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -401,7 +480,7 @@ class _CartBottomSheet extends ConsumerWidget {
                             ),
                           ),
                           Text(
-                            currency.format(item.product.price),
+                            currency.format(item.product.priceLocal),
                             style: TextStyle(
                               color: colorScheme.onSurfaceVariant,
                               fontSize: 13,
@@ -450,7 +529,7 @@ class _CartBottomSheet extends ConsumerWidget {
           SizedBox(
             width: double.infinity,
             child: FilledButton(
-              onPressed: () {},
+              onPressed: () => context.push('/checkout'),
               style: FilledButton.styleFrom(
                 backgroundColor: colorScheme.primary,
                 padding: const EdgeInsets.symmetric(vertical: 16),
@@ -524,34 +603,65 @@ class _DesktopProductSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final products = ref.watch(productsProvider);
+    final productsAsync = ref.watch(productsProvider);
+    final categoriesAsync = ref.watch(categoriesProvider);
+    final selectedCategoryIndex = ref.watch(selectedCategoryIndexProvider);
+    final searchQuery = ref.watch(productSearchQueryProvider);
+    final categories = categoriesAsync.when(
+      data: (items) => ['Semua', ...items.map((c) => c.name)],
+      loading: () => const ['Semua'],
+      error: (_, __) => const ['Semua'],
+    );
+    if (selectedCategoryIndex >= categories.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(selectedCategoryIndexProvider.notifier).setIndex(0);
+      });
+    }
 
     return Column(
       children: [
         // Reusing mobile header components but maybe slightly adjusted padding
-        _buildHeader(context),
+        _buildHeader(context, ref),
         const SizedBox(height: 24),
-        _buildCategories(context),
+        _buildCategories(context, ref, categories),
         const SizedBox(height: 24),
         Expanded(
-          child: GridView.builder(
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 220,
-              childAspectRatio: 0.75, // Taller for vertical card
-              crossAxisSpacing: 16,
-              mainAxisSpacing: 16,
-            ),
-            itemCount: products.length,
-            itemBuilder: (context, index) {
-              return _ProductGridCard(product: products[index]);
+          child: productsAsync.when(
+            data: (products) {
+              final filteredProducts = _filterProductsByCategory(
+                products,
+                selectedCategoryIndex,
+                categories,
+              );
+              final searchedProducts =
+                  _filterProductsByQuery(filteredProducts, searchQuery);
+              if (searchedProducts.isEmpty) {
+                return const Center(child: Text('Produk belum tersedia.'));
+              }
+              return GridView.builder(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 220,
+                  childAspectRatio: 0.75,
+                  crossAxisSpacing: 16,
+                  mainAxisSpacing: 16,
+                ),
+                itemCount: searchedProducts.length,
+                itemBuilder: (context, index) {
+                  return _ProductGridCard(product: searchedProducts[index]);
+                },
+              );
             },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => Center(
+              child: Text('Gagal memuat produk: $error'),
+            ),
           ),
         ),
       ],
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildHeader(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
     return Row(
       children: [
@@ -576,6 +686,9 @@ class _DesktopProductSection extends ConsumerWidget {
                       hintStyle: TextStyle(color: colorScheme.onSurfaceVariant),
                     ),
                     cursorColor: colorScheme.primary,
+                    onChanged: (value) => ref
+                        .read(productSearchQueryProvider.notifier)
+                        .setQuery(value),
                   ),
                 ),
               ],
@@ -601,9 +714,13 @@ class _DesktopProductSection extends ConsumerWidget {
     );
   }
 
-  Widget _buildCategories(BuildContext context) {
+  Widget _buildCategories(
+    BuildContext context,
+    WidgetRef ref,
+    List<String> categories,
+  ) {
     final colorScheme = Theme.of(context).colorScheme;
-    final categories = ['Semua', 'Makanan', 'Minuman', 'Snack', 'Topping'];
+    final selectedIndex = ref.watch(selectedCategoryIndexProvider);
     return SizedBox(
       height: 48,
       child: ListView.separated(
@@ -611,9 +728,8 @@ class _DesktopProductSection extends ConsumerWidget {
         itemCount: categories.length,
         separatorBuilder: (context, index) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
-          final isSelected = index == 0;
-          return Chip(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          final isSelected = index == selectedIndex;
+          return ChoiceChip(
             label: Text(
               categories[index],
               style: TextStyle(
@@ -623,16 +739,20 @@ class _DesktopProductSection extends ConsumerWidget {
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
               ),
             ),
-            backgroundColor:
-                isSelected ? colorScheme.primaryContainer : colorScheme.surface,
+            selected: isSelected,
+            onSelected: (_) =>
+                ref.read(selectedCategoryIndexProvider.notifier).setIndex(index),
+            backgroundColor: colorScheme.surface,
+            selectedColor: colorScheme.primaryContainer,
+            side: BorderSide(
+              color:
+                  isSelected ? Colors.transparent : colorScheme.outlineVariant,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: BorderSide(
-                color:
-                    isSelected ? Colors.transparent : colorScheme.outlineVariant,
-              ),
             ),
-            side: BorderSide.none,
+            showCheckmark: false,
           );
         },
       ),
@@ -711,7 +831,7 @@ class _ProductGridCard extends ConsumerWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          currency.format(product.price),
+                          currency.format(product.priceLocal),
                           style: TextStyle(
                             color: colorScheme.primary,
                             fontWeight: FontWeight.bold,
@@ -750,6 +870,10 @@ class _DesktopCartSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final cart = ref.watch(cartProvider);
     final total = ref.watch(cartTotalProvider);
+    final taxSettings = ref.watch(taxSettingsProvider);
+    final taxRate = taxSettings.enabled ? taxSettings.rate / 100 : 0;
+    final taxAmount = total * taxRate;
+    final totalWithTax = total + taxAmount;
     final currency = NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0);
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -815,9 +939,18 @@ class _DesktopCartSection extends ConsumerWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(item.product.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                              Text(
+                                item.product.name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
                               const SizedBox(height: 4),
-                              Text(currency.format(item.product.price), style: TextStyle(color: Colors.grey[600])),
+                              Text(
+                                currency.format(item.product.priceLocal),
+                                style: TextStyle(color: Colors.grey[600]),
+                              ),
                             ],
                           ),
                         ),
@@ -855,21 +988,25 @@ class _DesktopCartSection extends ConsumerWidget {
             children: [
               _OrderSummaryRow(label: 'Subtotal', value: currency.format(total)),
               const SizedBox(height: 12),
-              _OrderSummaryRow(label: 'Tax (10%)', value: currency.format(total * 0.1)),
+              _OrderSummaryRow(
+                label: _taxLabel(taxSettings),
+                value: currency.format(taxAmount),
+              ),
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 16),
                 child: Divider(),
               ),
               _OrderSummaryRow(
                 label: 'Total',
-                value: currency.format(total * 1.1),
+                value: currency.format(totalWithTax),
                 isTotal: true,
               ),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: cart.isEmpty ? null : () {},
+                  onPressed:
+                      cart.isEmpty ? null : () => context.push('/checkout'),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF00BFA5),
                     padding: const EdgeInsets.symmetric(vertical: 20),
@@ -883,6 +1020,19 @@ class _DesktopCartSection extends ConsumerWidget {
         ),
       ],
     );
+  }
+
+  String _taxLabel(TaxSettings settings) {
+    final rateText = _formatTaxRate(settings.rate);
+    return settings.enabled ? 'Pajak ($rateText%)' : 'Pajak (Nonaktif)';
+  }
+
+  String _formatTaxRate(double rate) {
+    if (rate % 1 == 0) return rate.toInt().toString();
+    return rate
+        .toStringAsFixed(2)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
   }
 }
 

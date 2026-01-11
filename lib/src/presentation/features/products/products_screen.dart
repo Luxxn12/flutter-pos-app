@@ -3,14 +3,59 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:go_router/go_router.dart';
 import '../../../domain/entities/product.dart';
+import '../categories/categories_provider.dart';
 import '../transactions/pos_state.dart'; // Importing provider from POS for now
+import '../auth/auth_provider.dart';
+
+class SelectedProductCategoryIndexNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void setIndex(int index) {
+    state = index;
+  }
+}
+
+final selectedProductCategoryIndexProvider =
+    NotifierProvider<SelectedProductCategoryIndexNotifier, int>(
+  SelectedProductCategoryIndexNotifier.new,
+);
+
+class ProductListSearchQueryNotifier extends Notifier<String> {
+  @override
+  String build() => '';
+
+  void setQuery(String query) {
+    state = query;
+  }
+}
+
+final productListSearchQueryProvider =
+    NotifierProvider<ProductListSearchQueryNotifier, String>(
+  ProductListSearchQueryNotifier.new,
+);
 
 class ProductsScreen extends ConsumerWidget {
   const ProductsScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final products = ref.watch(productsProvider);
+    final productsAsync = ref.watch(productsProvider);
+    final categoriesAsync = ref.watch(categoriesProvider);
+    final isAdmin = ref.watch(isAdminProvider);
+    final searchQuery = ref.watch(productListSearchQueryProvider);
+    final selectedCategoryIndex =
+        ref.watch(selectedProductCategoryIndexProvider);
+    final categories = categoriesAsync.when(
+      data: (items) => ['Semua', ...items.map((c) => c.name)],
+      loading: () => const ['Semua'],
+      error: (_, __) => const ['Semua'],
+    );
+    if (selectedCategoryIndex >= categories.length) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(selectedProductCategoryIndexProvider.notifier).setIndex(0);
+      });
+    }
     final theme = Theme.of(context);
 
     return Scaffold(
@@ -20,41 +65,83 @@ class ProductsScreen extends ConsumerWidget {
           children: [
             Column(
               children: [
-                _buildHeader(context),
-                _buildCategories(context),
+                _buildHeader(context, ref),
+                _buildCategories(context, ref, categories),
                 const SizedBox(height: 12),
                 Expanded(
-                  child: ListView.separated(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-                    itemCount: products.length,
-                    separatorBuilder: (context, index) =>
-                        const SizedBox(height: 16),
-                    itemBuilder: (context, index) {
-                      return _ProductInventoryCard(product: products[index]);
+                  child: productsAsync.when(
+                    data: (products) {
+                      final filteredProducts = selectedCategoryIndex == 0
+                          ? products
+                          : products
+                              .where(
+                                (product) =>
+                                    product.category ==
+                                    categories[selectedCategoryIndex],
+                              )
+                              .toList();
+                      final searchedProducts = _filterProductsByQuery(
+                        filteredProducts,
+                        searchQuery,
+                      );
+                      if (searchedProducts.isEmpty) {
+                        return const Center(child: Text('Belum ada produk.'));
+                      }
+                      return ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                        itemCount: searchedProducts.length,
+                        separatorBuilder: (context, index) =>
+                            const SizedBox(height: 16),
+                        itemBuilder: (context, index) {
+                          return _ProductInventoryCard(
+                            product: searchedProducts[index],
+                            canEdit: isAdmin,
+                          );
+                        },
+                      );
                     },
+                    loading: () =>
+                        const Center(child: CircularProgressIndicator()),
+                    error: (error, _) => Center(
+                      child: Text('Gagal memuat produk: $error'),
+                    ),
                   ),
                 ),
               ],
             ),
-            Positioned(
-              right: 20,
-              bottom: 20,
-              child: FloatingActionButton(
-                onPressed: () => context.push('/products/add'),
-                backgroundColor: const Color(0xFF00BFA5),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+            if (isAdmin)
+              Positioned(
+                right: 20,
+                bottom: 20,
+                child: FloatingActionButton(
+                  onPressed: () => context.push('/products/add'),
+                  backgroundColor: const Color(0xFF00BFA5),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: const Icon(Icons.add, color: Colors.white),
                 ),
-                child: const Icon(Icons.add, color: Colors.white),
               ),
-            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  List<Product> _filterProductsByQuery(
+    List<Product> products,
+    String query,
+  ) {
+    final trimmed = query.trim().toLowerCase();
+    if (trimmed.isEmpty) return products;
+    return products.where((product) {
+      final name = product.name.toLowerCase();
+      final sku = product.id.toLowerCase();
+      return name.contains(trimmed) || sku.contains(trimmed);
+    }).toList();
+  }
+
+  Widget _buildHeader(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -83,6 +170,9 @@ class ProductsScreen extends ConsumerWidget {
                         contentPadding: EdgeInsets.only(bottom: 4),
                       ),
                       cursorColor: colorScheme.primary,
+                      onChanged: (value) => ref
+                          .read(productListSearchQueryProvider.notifier)
+                          .setQuery(value),
                     ),
                   ),
                 ],
@@ -108,9 +198,13 @@ class ProductsScreen extends ConsumerWidget {
     );
   }
 
-  Widget _buildCategories(BuildContext context) {
+  Widget _buildCategories(
+    BuildContext context,
+    WidgetRef ref,
+    List<String> categories,
+  ) {
     final colorScheme = Theme.of(context).colorScheme;
-    final categories = ['Semua', 'Makanan', 'Minuman', 'Snack'];
+    final selectedIndex = ref.watch(selectedProductCategoryIndexProvider);
     return SizedBox(
       height: 50,
       child: ListView.separated(
@@ -119,8 +213,8 @@ class ProductsScreen extends ConsumerWidget {
         itemCount: categories.length,
         separatorBuilder: (context, index) => const SizedBox(width: 12),
         itemBuilder: (context, index) {
-          final isSelected = index == 0;
-          return Chip(
+          final isSelected = index == selectedIndex;
+          return ChoiceChip(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             label: Text(
               categories[index],
@@ -131,17 +225,20 @@ class ProductsScreen extends ConsumerWidget {
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
               ),
             ),
-            backgroundColor: isSelected
-                ? colorScheme.primaryContainer
-                : colorScheme.surface,
+            selected: isSelected,
+            onSelected: (_) => ref
+                .read(selectedProductCategoryIndexProvider.notifier)
+                .setIndex(index),
+            backgroundColor: colorScheme.surface,
+            selectedColor: colorScheme.primaryContainer,
+            side: BorderSide(
+              color:
+                  isSelected ? Colors.transparent : colorScheme.outlineVariant,
+            ),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: BorderSide(
-                color:
-                    isSelected ? Colors.transparent : colorScheme.outlineVariant,
-              ),
             ),
-            side: BorderSide.none,
+            showCheckmark: false,
           );
         },
       ),
@@ -151,7 +248,11 @@ class ProductsScreen extends ConsumerWidget {
 
 class _ProductInventoryCard extends StatelessWidget {
   final Product product;
-  const _ProductInventoryCard({required this.product});
+  final bool canEdit;
+  const _ProductInventoryCard({
+    required this.product,
+    required this.canEdit,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -226,7 +327,7 @@ class _ProductInventoryCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  currency.format(product.price),
+                  currency.format(product.priceLocal),
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 15,
@@ -261,14 +362,20 @@ class _ProductInventoryCard extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 10),
-              IconButton(
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                icon: Icon(Icons.edit_outlined, color: colorScheme.onSurfaceVariant),
-                onPressed: () => context.push('/products/edit', extra: product),
-                splashRadius: 20,
-              ),
+              if (canEdit) ...[
+                const SizedBox(width: 10),
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 36, minHeight: 36),
+                  icon: Icon(
+                    Icons.edit_outlined,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  onPressed: () => context.push('/products/edit', extra: product),
+                  splashRadius: 20,
+                ),
+              ],
             ],
           ),
         ],

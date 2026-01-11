@@ -1,6 +1,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'auth_provider.dart';
 
@@ -76,13 +77,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
-    
-    // Mock login delay
-    await Future.delayed(const Duration(seconds: 1));
-    
-    if (mounted) {
-      ref.read(authProvider.notifier).login();
-      // Router will handle redirect
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      await ref.read(authControllerProvider).signIn(
+            email: _emailController.text.trim(),
+            password: _passwordController.text,
+          );
+    } on AuthException catch (error) {
+      messenger.showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    } catch (_) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Login gagal, coba lagi.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 }
@@ -139,7 +152,7 @@ class _MobileLayout extends StatelessWidget {
             decoration: InputDecoration(
               labelText: 'Email',
               prefixIcon: const Icon(Icons.email_outlined),
-              hintText: 'admin@pos.com',
+              hintText: '',
               filled: true,
               fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
@@ -182,10 +195,6 @@ class _MobileLayout extends StatelessWidget {
               : const Text('Login', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ),
           const SizedBox(height: 24),
-          TextButton(
-             onPressed: () {},
-             child: const Text('Forgot Password?'),
-          ),
         ],
       ),
     );

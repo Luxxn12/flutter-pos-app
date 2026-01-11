@@ -292,7 +292,7 @@ class HistoryDetailScreen extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           _buildAmountRow(
-            'Pajak (0%)',
+            'Pajak (${_formatTaxRate(subtotal, transaction.tax)})',
             currency.format(transaction.tax),
             colorScheme: colorScheme,
           ),
@@ -393,5 +393,14 @@ class HistoryDetailScreen extends StatelessWidget {
       case PaymentMethod.debit:
         return 'Kartu Debit';
     }
+  }
+
+  String _formatTaxRate(double subtotal, double taxAmount) {
+    if (subtotal <= 0) return '0%';
+    final rate = (taxAmount / subtotal) * 100;
+    final formatted = rate % 1 == 0
+        ? rate.toInt().toString()
+        : rate.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+    return '$formatted%';
   }
 }

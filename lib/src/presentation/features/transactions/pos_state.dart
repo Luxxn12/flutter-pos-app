@@ -2,6 +2,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../../data/repositories/product_repository.dart';
 import '../../../domain/entities/product.dart';
 
 // --- Models ---
@@ -14,24 +15,79 @@ class CartItem {
 
   CartItem({required this.id, required this.product, required this.quantity});
 
-  double get total => product.price * quantity;
+  double get total => product.priceLocal * quantity;
 }
 
 // --- Providers ---
 
-// Mock Products
-final productsProvider = Provider<List<Product>>((ref) {
-  return [
-    Product(id: '1', name: 'Kopi Susu', price: 18000, category: 'Minuman', stock: 145),
-    Product(id: '2', name: 'Teh Tarik', price: 15000, category: 'Minuman', stock: 52),
-    Product(id: '3', name: 'Nasi Goreng', price: 25000, category: 'Makanan', stock: 21),
-    Product(id: '4', name: 'Mie Goreng', price: 25000, category: 'Makanan', stock: 12),
-    Product(id: '5', name: 'Roti Bakar', price: 12000, category: 'Snack', stock: 4),
-    Product(id: '6', name: 'Pisang Goreng', price: 10000, category: 'Snack', stock: 0),
-    Product(id: '7', name: 'Es Jeruk', price: 10000, category: 'Minuman', stock: 88),
-    Product(id: '8', name: 'Air Mineral', price: 5000, category: 'Minuman', stock: 210),
-  ];
-});
+class ProductsNotifier extends AsyncNotifier<List<Product>> {
+  @override
+  Future<List<Product>> build() async {
+    final repo = ref.read(productRepositoryProvider);
+    return repo.fetchProducts();
+  }
+
+  Future<void> refresh() async {
+    final repo = ref.read(productRepositoryProvider);
+    state = const AsyncValue.loading();
+    state = await AsyncValue.guard(repo.fetchProducts);
+  }
+
+  Future<Product> createProduct(ProductInput input) async {
+    final repo = ref.read(productRepositoryProvider);
+    final created = await repo.createProduct(input);
+    state = state.whenData((items) => [created, ...items]);
+    return created;
+  }
+
+  Future<Product> updateProduct(String id, ProductInput input) async {
+    final repo = ref.read(productRepositoryProvider);
+    final updated = await repo.updateProduct(id, input);
+    state = state.whenData(
+      (items) => items.map((p) => p.id == id ? updated : p).toList(),
+    );
+    return updated;
+  }
+
+  Future<void> deleteProduct(String id) async {
+    final repo = ref.read(productRepositoryProvider);
+    await repo.deleteProduct(id);
+    state = state.whenData((items) => items.where((p) => p.id != id).toList());
+  }
+}
+
+final productsProvider =
+    AsyncNotifierProvider<ProductsNotifier, List<Product>>(
+  ProductsNotifier.new,
+);
+
+class SelectedCategoryIndexNotifier extends Notifier<int> {
+  @override
+  int build() => 0;
+
+  void setIndex(int index) {
+    state = index;
+  }
+}
+
+final selectedCategoryIndexProvider =
+    NotifierProvider<SelectedCategoryIndexNotifier, int>(
+  SelectedCategoryIndexNotifier.new,
+);
+
+class ProductSearchQueryNotifier extends Notifier<String> {
+  @override
+  String build() => '';
+
+  void setQuery(String query) {
+    state = query;
+  }
+}
+
+final productSearchQueryProvider =
+    NotifierProvider<ProductSearchQueryNotifier, String>(
+  ProductSearchQueryNotifier.new,
+);
 
 // Cart State Logic
 // Cart State Logic
