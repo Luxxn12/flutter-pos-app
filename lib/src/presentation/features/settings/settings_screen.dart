@@ -183,6 +183,8 @@ class SettingsScreen extends ConsumerWidget {
               const SizedBox(height: 24),
               GestureDetector(
                 onTap: () async {
+                  final confirmed = await _showLogoutDialog(context);
+                  if (confirmed != true) return;
                   await ref.read(authControllerProvider).signOut();
                 },
                 child: Container(
@@ -219,6 +221,33 @@ class SettingsScreen extends ConsumerWidget {
           ),
         ),
       ),
+    );
+  }
+
+  Future<bool?> _showLogoutDialog(BuildContext context) {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) {
+        final colorScheme = Theme.of(context).colorScheme;
+        return AlertDialog(
+          title: const Text('Keluar Akun'),
+          content: const Text('Yakin mau keluar dari akun ini?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: colorScheme.error,
+                foregroundColor: colorScheme.onError,
+              ),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Keluar'),
+            ),
+          ],
+        );
+      },
     );
   }
 

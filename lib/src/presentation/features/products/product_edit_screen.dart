@@ -263,27 +263,27 @@ class _ProductEditScreenState extends ConsumerState<ProductEditScreen> {
               ),
               child: Row(
                 children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: widget.product == null || _isSaving
-                          ? null
-                          : _confirmDelete,
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: redButton,
-                        side: BorderSide(color: redButton, width: 1.5),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(26),
+                  if (widget.product != null) ...[
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: _isSaving ? null : _confirmDelete,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: redButton,
+                          side: BorderSide(color: redButton, width: 1.5),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(26),
+                          ),
+                          textStyle: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                        textStyle: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        child: const Text('Hapus'),
                       ),
-                      child: const Text('Hapus'),
                     ),
-                  ),
-                  const SizedBox(width: 14),
+                    const SizedBox(width: 14),
+                  ],
                   Expanded(
                     child: ElevatedButton(
                       onPressed: _isSaving ? null : _saveProduct,

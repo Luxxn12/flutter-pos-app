@@ -1,6 +1,6 @@
 {
-    "name": "flutter_pos_app",
-    "short_name": "flutter_pos_app",
+    "name": "SmartPOS",
+    "short_name": "SmartPOS",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

@@ -143,39 +143,45 @@ class ProductsScreen extends ConsumerWidget {
 
   Widget _buildHeader(BuildContext context, WidgetRef ref) {
     final colorScheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
       padding: const EdgeInsets.all(20),
       child: Row(
         children: [
           Expanded(
-            child: Container(
+            child: SizedBox(
               height: 48,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              decoration: BoxDecoration(
-                color: colorScheme.surfaceVariant.withOpacity(0.6),
-                borderRadius: BorderRadius.circular(24),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.search, color: colorScheme.onSurfaceVariant),
-                  SizedBox(width: 12),
-                  Expanded(
-                    child: TextField(
-                      decoration: InputDecoration(
-                        border: InputBorder.none,
-                        hintText: 'Cari produk atau SKU...',
-                        hintStyle: TextStyle(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                        contentPadding: EdgeInsets.only(bottom: 4),
-                      ),
-                      cursorColor: colorScheme.primary,
-                      onChanged: (value) => ref
-                          .read(productListSearchQueryProvider.notifier)
-                          .setQuery(value),
-                    ),
+              child: TextField(
+                decoration: InputDecoration(
+                  hintText: 'Cari produk atau SKU...',
+                  prefixIcon: Icon(
+                    Icons.search,
+                    color: colorScheme.onSurfaceVariant,
                   ),
-                ],
+                  hintStyle: TextStyle(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  filled: true,
+                  fillColor: isDark ? colorScheme.surface : Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: colorScheme.outlineVariant),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: colorScheme.outlineVariant),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: colorScheme.primary, width: 1.2),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                ),
+                cursorColor: colorScheme.primary,
+                onChanged: (value) => ref
+                    .read(productListSearchQueryProvider.notifier)
+                    .setQuery(value),
               ),
             ),
           ),

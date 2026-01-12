@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  static const seedColor = Color(0xFF00BFA5); // Teal Primary
+  static const seedColor = Color(0xFF0EA5A4); // Teal Primary
 
   static final lightTheme = ThemeData(
     useMaterial3: true,
@@ -14,6 +14,10 @@ class AppTheme {
       primary: seedColor,
       brightness: Brightness.light,
       surfaceContainerHighest: const Color(0xFFF6F8FA),
+    ).copyWith(
+      primaryContainer: seedColor,
+      secondary: seedColor,
+      secondaryContainer: seedColor,
     ),
     navigationBarTheme: NavigationBarThemeData(
       labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
@@ -69,7 +73,14 @@ class AppTheme {
     scaffoldBackgroundColor: const Color(0xFF0F172A),
     colorScheme: ColorScheme.fromSeed(
       seedColor: seedColor,
+      primary: seedColor,
       brightness: Brightness.dark,
+    ).copyWith(
+      primaryContainer: seedColor,
+      onPrimary: Colors.white,
+      onPrimaryContainer: Colors.white,
+      secondary: seedColor,
+      secondaryContainer: seedColor,
     ),
     textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
     appBarTheme: const AppBarTheme(
